@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 
 export default function Home() {
 
-  const [actionsMode, setActionsMode] = useState<'inline' | 'dropdown'>('dropdown');
+  const [actionsMode, setActionsMode] = useState<'inline' | 'dropdown'>('inline');
 
   const avatarShape: AvatarShape = "rounded";
 
@@ -248,6 +248,14 @@ export default function Home() {
         { value: "user", label: "Usuario" },
       ],
     },
+    {
+      key: "status",
+      label: "Estados",
+      options: [
+        { value: "active", label: "Activo" },
+        { value: "inactive", label: "Inactivo" },
+      ],
+    },
   ];
 
   const actions: TableAction<typeof data[0]>[] = [
@@ -283,13 +291,8 @@ export default function Home() {
   return (
     <div className="w-full min-h-screen py-10">
       <div className="container mx-auto space-y-4">
-        <div className="flex justify-end">
-          <Button
-            variant="outline"
-            onClick={() => setActionsMode(prev => prev === 'inline' ? 'dropdown' : 'inline')}
-          >
-            {actionsMode === 'inline' ? 'Modo Menú' : 'Modo Inline'}
-          </Button>
+        <div className="py-6">
+          <h1 className="text-2xl font-bold text-center">Table test</h1>
         </div>
         <FullTable
           data={data}
@@ -297,7 +300,7 @@ export default function Home() {
           filters={filters}
           actions={actions}
           actionsMode={actionsMode}
-          selectable={true}
+          selectable={false}
         />
       </div>
     </div>
