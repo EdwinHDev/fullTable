@@ -1,92 +1,107 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import FullTable, { AvatarShape } from '../FullTable';
+import FullTable, { Column, TableRecord } from '../ui/FullTable';
 import { Badge } from '@/components/ui/badge';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import '@testing-library/jest-dom';
 
+// Mock ResizeObserver
+class ResizeObserverMock {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+global.ResizeObserver = ResizeObserverMock;
+
+// Mock window.matchMedia
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: vi.fn().mockImplementation(query => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })),
+});
+
+interface TestRecord extends TableRecord {
+  name: string;
+  status: "active" | "inactive";
+  role: "admin" | "user";
+  avatar: string;
+  [key: string]: string | number;
+}
+
 describe('FullTable Component', () => {
-  const mockData = [
+  const mockData: TestRecord[] = [
     { id: 1, name: "John", status: "active", role: "admin", avatar: "https://example.com/1.jpg" },
     { id: 2, name: "Jane", status: "inactive", role: "user", avatar: "https://example.com/2.jpg" },
     { id: 3, name: "Bob", status: "active", role: "user", avatar: "https://example.com/3.jpg" },
   ];
 
-  const mockColumns = [
+  const mockColumns: Column<TestRecord>[] = [
     { 
-      key: "avatar", 
-      label: "Avatar", 
-      type: "image" as const,
+      header: "Avatar",
+      key: "avatar",
       className: "w-[64px]",
-      imageProps: {
-        width: 40,
-        height: 40,
-        className: "border border-gray-200",
-        fallback: "/default-avatar.jpeg",
-        shape: "rounded" as AvatarShape
-      }
+      render: (value, row) => (
+        <Avatar>
+          <AvatarImage src={row.avatar} />
+          <AvatarFallback>{ row.name.split(" ")[0][0] }</AvatarFallback>
+        </Avatar>
+      )
     },
-    { key: "name", label: "Nombre", type: "text" as const },
     { 
-      key: "status", 
-      label: "Estado",
-      type: "text" as const,
-      render: (value: string) => (
-        <Badge variant={value === "active" ? "success" : "danger"}>
+      header: "Nombre",
+      key: "name",
+      sortable: true
+    },
+    { 
+      header: "Estado",
+      key: "status",
+      filterable: true,
+      render: (value) => (
+        <Badge variant={value === "active" ? "default" : "secondary"}>
           {value === "active" ? "Activo" : "Inactivo"}
         </Badge>
       )
     },
     { 
-      key: "role", 
-      label: "Rol",
-      type: "text" as const,
-      render: (value: string) => (
-        <Badge variant={value === "admin" ? "default" : "outline"}>
+      header: "Rol",
+      key: "role",
+      className: "w-[100px]",
+      filterable: true,
+      render: (value) => (
+        <Badge variant={value === "admin" ? "default" : "secondary"}>
           {value === "admin" ? "Administrador" : "Usuario"}
         </Badge>
       )
     }
   ];
 
-  const mockActions = [
-    {
-      label: "Ver",
-      onClick: vi.fn(),
-      show: (_: any, selectedCount: number) => selectedCount <= 1
-    },
-    {
-      label: "Editar",
-      onClick: vi.fn(),
-      show: (_: any, selectedCount: number) => selectedCount <= 1
-    },
-    {
-      label: "Eliminar",
-      onClick: vi.fn()
-    },
-  ];
-
   beforeEach(() => {
-    mockActions.forEach(action => {
-      if (action.onClick) {
-        action.onClick.mockClear();
-      }
-    });
+    vi.clearAllMocks();
   });
 
   it('renders all columns and data correctly', () => {
     render(
-      <FullTable
+      <FullTable<TestRecord>
         data={mockData}
         columns={mockColumns}
-        actions={mockActions}
-        selectable={true}
       />
     );
 
     // Verificar que se muestran todas las columnas
     mockColumns.forEach(column => {
-      expect(screen.getByText(column.label)).toBeInTheDocument();
+      if (typeof column.header === 'string') {
+        expect(screen.getByText(column.header)).toBeInTheDocument();
+      }
     });
 
     // Verificar que se muestran todos los datos
@@ -96,12 +111,13 @@ describe('FullTable Component', () => {
   });
 
   it('handles row selection correctly', async () => {
+    const handleSelectionChange = vi.fn();
     const { container } = render(
-      <FullTable
+      <FullTable<TestRecord>
         data={mockData}
         columns={mockColumns}
-        actions={mockActions}
-        selectable={true}
+        enableSelection={true}
+        onSelectionChange={handleSelectionChange}
       />
     );
 
@@ -110,46 +126,16 @@ describe('FullTable Component', () => {
     const firstRowCheckbox = checkboxes[1]; // El primer checkbox es el "select all"
     await userEvent.click(firstRowCheckbox);
 
-    // Verificar que se muestra el contador de selección
-    const selectedCount = screen.getByText(/1 elemento/i);
-    expect(selectedCount).toBeInTheDocument();
-  });
-
-  it('handles bulk actions correctly', async () => {
-    const { container } = render(
-      <FullTable
-        data={mockData}
-        columns={mockColumns}
-        actions={mockActions}
-        selectable={true}
-      />
-    );
-
-    // Seleccionar todas las filas
-    const selectAllCheckbox = container.querySelector('[role="checkbox"]');
-    await userEvent.click(selectAllCheckbox!);
-
-    // Verificar que las acciones "Ver" y "Editar" están ocultas
-    expect(screen.queryByText('Ver')).not.toBeInTheDocument();
-    expect(screen.queryByText('Editar')).not.toBeInTheDocument();
-
-    // Encontrar y ejecutar la acción de eliminar
-    const deleteButtons = screen.getAllByText('Eliminar');
-    // Usamos el primer botón de eliminar que encontremos
-    await userEvent.click(deleteButtons[0]);
-
-    // Verificar que se llamó a la función con todos los elementos seleccionados
-    const selectedItems = mockData;
-    expect(mockActions[2].onClick).toHaveBeenCalledWith(selectedItems);
+    // Verificar que se llamó al callback con el ID correcto
+    expect(handleSelectionChange).toHaveBeenCalledWith([1]);
   });
 
   it('handles sorting correctly', async () => {
     render(
-      <FullTable
+      <FullTable<TestRecord>
         data={mockData}
         columns={mockColumns}
-        actions={mockActions}
-        selectable={true}
+        enableSorting={true}
       />
     );
 
@@ -157,27 +143,38 @@ describe('FullTable Component', () => {
     const nameHeader = screen.getByText('Nombre');
     await userEvent.click(nameHeader);
 
-    // Verificar que los nombres están ordenados alfabéticamente
+    // Verificar que los nombres están ordenados alfabéticamente (asc)
     const rows = screen.getAllByRole('row');
     const firstRowName = within(rows[1]).getByText('Bob');
     const lastRowName = within(rows[3]).getByText('John');
     
     expect(firstRowName).toBeInTheDocument();
     expect(lastRowName).toBeInTheDocument();
+
+    // Hacer clic nuevamente para ordenar desc
+    await userEvent.click(nameHeader);
+
+    const rowsDesc = screen.getAllByRole('row');
+    const firstRowNameDesc = within(rowsDesc[1]).getByText('John');
+    const lastRowNameDesc = within(rowsDesc[3]).getByText('Bob');
+    
+    expect(firstRowNameDesc).toBeInTheDocument();
+    expect(lastRowNameDesc).toBeInTheDocument();
   });
 
   it('handles search correctly', async () => {
+    const searchPlaceholder = "Buscar cliente";
     render(
-      <FullTable
+      <FullTable<TestRecord>
         data={mockData}
         columns={mockColumns}
-        actions={mockActions}
-        selectable={true}
+        enableSearch={true}
+        searchPlaceholder={searchPlaceholder}
       />
     );
 
     // Buscar "John"
-    const searchInput = screen.getByPlaceholderText('Buscar');
+    const searchInput = screen.getByPlaceholderText(searchPlaceholder);
     await userEvent.type(searchInput, 'John');
 
     // Verificar que solo se muestra John
@@ -186,7 +183,7 @@ describe('FullTable Component', () => {
   });
 
   it('handles pagination correctly', async () => {
-    const manyItems = Array.from({ length: 12 }, (_, i) => ({
+    const manyItems: TestRecord[] = Array.from({ length: 12 }, (_, i) => ({
       id: i + 1,
       name: `User ${i + 1}`,
       status: "active",
@@ -195,12 +192,11 @@ describe('FullTable Component', () => {
     }));
 
     render(
-      <FullTable
+      <FullTable<TestRecord>
         data={manyItems}
         columns={mockColumns}
-        actions={mockActions}
-        selectable={true}
-        pageSize={10}
+        enablePagination={true}
+        defaultPageSize={10}
       />
     );
 
@@ -209,11 +205,169 @@ describe('FullTable Component', () => {
     expect(rows.length).toBe(11); // 10 filas + 1 encabezado
 
     // Ir a la siguiente página
-    const nextButton = screen.getByRole('link', { name: /Go to next page/i });
+    const nextButton = screen.getByLabelText('Go to next page');
     await userEvent.click(nextButton);
 
     // Verificar que se muestran los elementos restantes
     const newRows = screen.getAllByRole('row');
     expect(newRows.length).toBe(3); // 2 filas + 1 encabezado
+  });
+
+  it('respects initial column visibility', () => {
+    const columnsWithHidden: Column<TestRecord>[] = [
+      ...mockColumns,
+      { 
+        header: "Hidden Column",
+        key: "id",
+        visible: false
+      }
+    ];
+
+    render(
+      <FullTable<TestRecord>
+        data={mockData}
+        columns={columnsWithHidden}
+      />
+    );
+
+    // Verificar que la columna oculta no está presente
+    expect(screen.queryByText('Hidden Column')).not.toBeInTheDocument();
+  });
+
+  it('applies sticky header styles correctly', () => {
+    const { container } = render(
+      <FullTable<TestRecord>
+        data={mockData}
+        columns={mockColumns}
+        enableStickyHeader={true}
+      />
+    );
+
+    const thead = container.querySelector('thead');
+    expect(thead).toHaveClass('sticky', 'top-0', 'z-10', 'shadow-sm');
+  });
+
+  it('handles responsive layout correctly', () => {
+    const { container } = render(
+      <FullTable<TestRecord>
+        data={mockData}
+        columns={mockColumns}
+        enablePagination={true}
+        showRowCount={true}
+      />
+    );
+
+    // Verificar el contenedor de paginación
+    const paginationContainer = container.querySelector('.flex.flex-col.items-center.gap-4');
+    expect(paginationContainer).toBeInTheDocument();
+
+    // En modo desktop (por defecto)
+    expect(paginationContainer).toHaveClass('flex-row', 'items-center', 'justify-between');
+  });
+
+  it('handles column toggle menu correctly', async () => {
+    render(
+      <FullTable<TestRecord>
+        data={mockData}
+        columns={mockColumns}
+        enableColumnToggle={true}
+      />
+    );
+
+    // Abrir el menú de columnas
+    const toggleButton = screen.getByRole('button', { name: /Columnas/i });
+    await userEvent.click(toggleButton);
+
+    // Verificar que todas las columnas están listadas
+    mockColumns.forEach(column => {
+      if (typeof column.header === 'string') {
+        expect(screen.getByRole('menuitemcheckbox', { name: column.header })).toBeInTheDocument();
+      }
+    });
+
+    // Toggle una columna
+    const firstColumnToggle = screen.getByRole('menuitemcheckbox', { name: mockColumns[0].header as string });
+    await userEvent.click(firstColumnToggle);
+
+    // Verificar que la columna se ocultó
+    expect(screen.queryByRole('columnheader', { name: mockColumns[0].header as string })).not.toBeInTheDocument();
+  });
+
+  it('handles empty state correctly', () => {
+    const emptyMessage = "No hay datos disponibles";
+    render(
+      <FullTable<TestRecord>
+        data={[]}
+        columns={mockColumns}
+        emptyMessage={emptyMessage}
+      />
+    );
+
+    expect(screen.getByText(emptyMessage)).toBeInTheDocument();
+  });
+
+  it('handles loading state correctly', () => {
+    render(
+      <FullTable<TestRecord>
+        data={mockData}
+        columns={mockColumns}
+        isLoading={true}
+      />
+    );
+
+    // Verificar que se muestra el loader
+    const loader = screen.getByRole('status');
+    expect(loader).toBeInTheDocument();
+    expect(loader).toHaveClass('animate-spin');
+  });
+
+  it('handles row count display correctly', () => {
+    render(
+      <FullTable<TestRecord>
+        data={mockData}
+        columns={mockColumns}
+        showRowCount={true}
+      />
+    );
+
+    expect(screen.getByText(`${mockData.length} filas en total`)).toBeInTheDocument();
+  });
+
+  it('handles striped rows correctly', () => {
+    const { container } = render(
+      <FullTable<TestRecord>
+        data={mockData}
+        columns={mockColumns}
+        enableStriped={true}
+      />
+    );
+
+    const rows = container.querySelectorAll('tbody tr');
+    expect(rows[0]).not.toHaveClass('bg-primary/10');
+    expect(rows[1]).toHaveClass('bg-primary/10');
+  });
+
+  it('handles filterable columns correctly', async () => {
+    render(
+      <FullTable<TestRecord>
+        data={mockData}
+        columns={mockColumns}
+      />
+    );
+
+    // Verificar que los botones de filtro están presentes
+    const statusButton = screen.getByRole('button', { name: /Estado/i });
+    const roleButton = screen.getByRole('button', { name: /Rol/i });
+
+    expect(statusButton).toBeInTheDocument();
+    expect(roleButton).toBeInTheDocument();
+
+    // Probar el filtro de estado
+    await userEvent.click(statusButton);
+    const activeCheckbox = screen.getByRole('menuitemcheckbox', { name: /Activo/i });
+    await userEvent.click(activeCheckbox);
+
+    // Verificar que solo se muestran los usuarios activos
+    expect(screen.getAllByText(/Activo/i)).toHaveLength(2);
   });
 }); 
